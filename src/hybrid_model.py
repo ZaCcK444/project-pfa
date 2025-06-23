@@ -9,8 +9,8 @@ class HybridRecommender:
         
         # Load models and data
         self.als_model = ALSModel.load("../models/als_model")
-        self.content_similarities = spark.read.parquet("../data/content_similarities.parquet")
-        self.product_catalog = spark.read.parquet("../data/product_catalog.parquet")
+        self.content_similarities = spark.read.parquet("data/content_similarities.parquet")
+        self.product_catalog = spark.read.parquet("data/product_catalog.parquet")
         
         # Load StringIndexers to convert between IDs
         from pyspark.ml.feature import StringIndexerModel
@@ -44,7 +44,7 @@ class HybridRecommender:
     
     def get_content_recommendations(self, user_id, n=10):
         # Get products the user has interacted with
-        user_reviews = self.spark.read.parquet("../data/cleaned_reviews.parquet")
+        user_reviews = self.spark.read.parquet("data/cleaned_reviews.parquet")
         
         # Get content-based recommendations
         content_recs = get_content_recommendations(
