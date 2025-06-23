@@ -1,26 +1,36 @@
-# app.py - Fixed version
 import streamlit as st
 from pyspark.sql import SparkSession
 import os
 from pathlib import Path
-
-from hybrid_model import HybridRecommender
-# Add src directory to Python path
 import sys
+
+# Add src directory to Python path
 sys.path.append(str(Path(__file__).parent / "src"))
 
+# Now import from hybrid_model
+from src.hybrid_model import HybridRecommender
 
 @st.cache_resource
 def init_spark():
-    """Initialize and cache Spark session"""
+    """Initialize Spark with crash-resistant settings"""
     return SparkSession.builder \
         .appName("ECommerceRecommender") \
-        .config("spark.driver.memory", "4g") \
-        .config("spark.executor.memory", "4g") \
+        .config("spark.driver.memory", "8g") \
+        .config("spark.executor.memory", "8g") \
+        .config("spark.driver.maxResultSize", "2g") \
         .config("spark.sql.execution.pyspark.udf.faulthandler.enabled", "true") \
         .config("spark.python.worker.faulthandler.enabled", "true") \
+        .config("spark.memory.fraction", "0.8") \
+        .config("spark.memory.storageFraction", "0.3") \
+        .config("spark.executor.memoryOverhead", "2g") \
+        .config("spark.driver.memoryOverhead", "2g") \
         .config("spark.sql.shuffle.partitions", "100") \
         .config("spark.default.parallelism", "100") \
+        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
+        .config("spark.kryoserializer.buffer.max", "256m") \
+        .config("spark.network.timeout", "600s") \
+        .config("spark.executor.heartbeatInterval", "60s") \
+        .config("spark.sql.pyspark.jvmStacktrace.enabled", "true") \
         .getOrCreate()
 
 @st.cache_resource
