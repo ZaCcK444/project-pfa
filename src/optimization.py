@@ -47,7 +47,7 @@ if __name__ == "__main__":
     spark = optimize_spark_config(spark)
     
     # Test with a sample user
-    reviews_df = spark.read.parquet("../data/cleaned_reviews.parquet")
+    reviews_df = spark.read.parquet("data/cleaned_reviews.parquet")
     sample_user = reviews_df.select("userId").first()[0]
     
     recommender = HybridRecommender(spark)

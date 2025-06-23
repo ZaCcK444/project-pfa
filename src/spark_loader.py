@@ -8,13 +8,15 @@ def load_data():
         # Initialize Spark with optimized configuration
         spark = SparkSession.builder \
             .appName("RecommendationSystem") \
+            .config("spark.sql.execution.pyspark.udf.faulthandler.enabled", "true") \
+            .config("spark.python.worker.faulthandler.enabled", "true") \
             .config("spark.driver.memory", "4g") \
             .config("spark.executor.memory", "4g") \
             .config("spark.sql.shuffle.partitions", "100") \
             .getOrCreate()
         
-        # Define and verify paths
-        base_path = os.path.abspath("C:\Users\PC\Desktop\project\data")
+        # Use relative path
+        base_path = os.path.join("data")
         reviews_path = os.path.join(base_path, "cleaned_reviews.parquet")
         catalog_path = os.path.join(base_path, "product_catalog.parquet")
         

@@ -1,11 +1,12 @@
 from pyspark.ml.feature import Tokenizer, StopWordsRemover, HashingTF, IDF
 from pyspark.ml import Pipeline
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, udf
+from pyspark.sql.functions import col, lit, udf, explode
 from pyspark.ml.linalg import Vectors, VectorUDT
 from pyspark.ml.feature import MinMaxScaler, VectorAssembler
 import pyspark.sql.functions as F
 from pyspark.sql.types import DoubleType, ArrayType, FloatType
+import numpy as np
 
 def preprocess_product_data(product_catalog):
     # Clean title text
@@ -20,7 +21,7 @@ def preprocess_product_data(product_catalog):
     hashingTF = HashingTF(inputCol="filtered_words", outputCol="raw_features", numFeatures=1000)
     idf = IDF(inputCol="raw_features", outputCol="tfidf_features")
     
-    # Price processing - convert to vector directly
+    # Price processing
     assembler = VectorAssembler(inputCols=["price"], outputCol="price_vec")
     scaler = MinMaxScaler(inputCol="price_vec", outputCol="scaled_price")
     
@@ -40,62 +41,74 @@ def preprocess_product_data(product_catalog):
     return processed_data
 
 def calculate_similarity(processed_data):
-    # Extract price value from scaled_price vector
-    def extract_price(v):
-        return float(v[0]) if v else None
+    # First, collect the product features to driver
+    product_features = processed_data.select("productId", "tfidf_features", "scaled_price").collect()
     
-    extract_price_udf = udf(extract_price, DoubleType())
+    # Create a broadcast variable with the features
+    features_map = {row.productId: (row.tfidf_features, row.scaled_price[0]) for row in product_features}
+    broadcast_features = SparkSession.getActiveSession().sparkContext.broadcast(features_map)
     
-    # Combine features
-    def combine_features(tfidf, price):
-        if tfidf is None or price is None:
-            return None
-        tfidf_array = tfidf.toArray().tolist()
-        return Vectors.dense(tfidf_array + [price])
+    # Define a more efficient cosine similarity UDF
+    def cosine_sim_udf(product1, product2):
+        features = broadcast_features.value
+        try:
+            vec1, price1 = features[product1]
+            vec2, price2 = features[product2]
+            
+            # Combine TF-IDF and price into a single vector
+            combined1 = np.append(vec1.toArray(), price1)
+            combined2 = np.append(vec2.toArray(), price2)
+            
+            # Calculate cosine similarity
+            dot_product = np.dot(combined1, combined2)
+            norm1 = np.linalg.norm(combined1)
+            norm2 = np.linalg.norm(combined2)
+            
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+            return float(dot_product / (norm1 * norm2))
+        except:
+            return 0.0
     
-    combine_features_udf = udf(combine_features, VectorUDT())
+    # Register the UDF
+    cosine_sim = udf(cosine_sim_udf, FloatType())
     
-    processed_data = processed_data.withColumn(
-        "price_value",
-        extract_price_udf(col("scaled_price"))
-    ).withColumn(
-        "features",
-        combine_features_udf(col("tfidf_features"), col("price_value"))
-    ).drop("price_value")
+    # Create a DataFrame with all product pairs (without cross join)
+    products = processed_data.select("productId").distinct()
+    products_list = products.collect()
     
-    # Cross join to get all product pairs
-    products = processed_data.select("productId", "features").alias("p1")
-    products_cross = processed_data.select("productId", "features").alias("p2")
+    # Create pairs using DataFrame operations instead of cross join
+    from itertools import combinations
+    pairs = []
+    for p1, p2 in combinations(products_list, 2):
+        pairs.append((p1.productId, p2.productId))
     
-    pairs = products.crossJoin(products_cross) \
-        .filter(col("p1.productId") != col("p2.productId"))
+    pairs_df = SparkSession.getActiveSession().createDataFrame(pairs, ["product1", "product2"])
     
-    # Calculate cosine similarity
-    def cosine_sim(v1, v2):
-        if v1 is None or v2 is None:
-            return None
-        return float(v1.dot(v2) / (v1.norm(2) * v2.norm(2)))
-    
-    cosine_sim_udf = udf(cosine_sim, DoubleType())
-    
-    similarities = pairs.withColumn(
+    # Calculate similarities
+    similarities = pairs_df.withColumn(
         "similarity",
-        cosine_sim_udf(col("p1.features"), col("p2.features"))
-    ).filter(col("similarity").isNotNull())
+        cosine_sim(col("product1"), col("product2"))
+    ).filter(col("similarity") > 0.1)  # Filter out very low similarities
     
     # Get top similar products for each product
-    top_similarities = similarities.groupBy("p1.productId") \
-        .agg(F.collect_list(
+    top_similarities = similarities.union(
+        similarities.select(
+            col("product2").alias("product1"),
+            col("product1").alias("product2"),
+            col("similarity")
+        )
+    ).groupBy("product1").agg(
+        F.collect_list(
             F.struct(
-                col("p2.productId").alias("similar_productId"),
+                col("product2").alias("similar_productId"),
                 col("similarity").alias("score")
             )
-        ).alias("similarities")) \
-        .withColumn(
-            "sorted_similarities",
-            F.expr("slice(array_sort(similarities, (a, b) -> case when a.score > b.score then -1 else 1 end), 1, 10)")
-        ) \
-        .select("productId", "sorted_similarities")
+        ).alias("similarities")
+    ).withColumn(
+        "sorted_similarities",
+        F.expr("slice(array_sort(similarities, (a, b) -> case when a.score > b.score then -1 else 1 end), 1, 10)")
+    ).select("product1", "sorted_similarities")
     
     return top_similarities
 
@@ -109,7 +122,8 @@ def get_content_recommendations(user_id, user_reviews, content_similarities, n=5
     # Get similar products to the liked ones
     recommendations = liked_products.join(
         content_similarities,
-        liked_products["productId"] == content_similarities["productId"]
+        liked_products["productId"] == content_similarities["product1"],
+        "left"
     ).select("sorted_similarities")
     
     # Explode and aggregate recommendations
@@ -127,22 +141,38 @@ def get_content_recommendations(user_id, user_reviews, content_similarities, n=5
 if __name__ == "__main__":
     from spark_loader import load_data
     
-    spark, reviews_df, product_catalog = load_data()
+    spark = SparkSession.builder \
+        .appName("ContentBasedRecSys") \
+        .config("spark.driver.memory", "4g") \
+        .config("spark.executor.memory", "4g") \
+        .config("spark.sql.shuffle.partitions", "100") \
+        .getOrCreate()
     
-    # Preprocess product data
-    processed_data = preprocess_product_data(product_catalog)
-    
-    # Calculate similarities
-    content_similarities = calculate_similarity(processed_data)
-    
-    # Save similarities
-    content_similarities.write.parquet("data/content_similarities.parquet", mode="overwrite")
-    
-    # Example: Get recommendations for a user
-    sample_user = reviews_df.select("userId").first()[0]
-    user_recs = get_content_recommendations(sample_user, reviews_df, content_similarities)
-    
-    print(f"Content-based recommendations for user {sample_user}:")
-    user_recs.show()
-    
-    spark.stop()
+    try:
+        # Load data with smaller subset for testing
+        _, reviews_df, product_catalog = load_data()
+        product_catalog = product_catalog.limit(1000)  # Limit for testing
+        
+        # Preprocess product data
+        print("Preprocessing product data...")
+        processed_data = preprocess_product_data(product_catalog)
+        
+        # Calculate similarities with smaller batch
+        print("Calculating product similarities...")
+        content_similarities = calculate_similarity(processed_data)
+        
+        # Save similarities
+        content_similarities.write.parquet("data/content_similarities.parquet", mode="overwrite")
+        
+        # Example: Get recommendations for a user
+        sample_user = reviews_df.select("userId").first()[0]
+        user_recs = get_content_recommendations(sample_user, reviews_df, content_similarities)
+        
+        print(f"Content-based recommendations for user {sample_user}:")
+        user_recs.show()
+        
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        raise
+    finally:
+        spark.stop()
