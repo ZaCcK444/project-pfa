@@ -1,7 +1,6 @@
 import streamlit as st
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
-import pandas as pd
+import os
 import sys
 from pathlib import Path
 
@@ -9,86 +8,109 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent / "src"))
 from hybrid_model import HybridRecommender
 
-# Initialize Spark session
 @st.cache_resource
 def init_spark():
-    spark = SparkSession.builder \
-        .appName("StreamlitApp") \
+    """Initialize and cache Spark session"""
+    return SparkSession.builder \
+        .appName("ECommerceRecommender") \
         .config("spark.driver.memory", "2g") \
         .getOrCreate()
-    return spark
 
-spark = init_spark()
-
-# Initialize recommender
 @st.cache_resource
-def init_recommender(spark):
-    return HybridRecommender(spark)
-
-recommender = init_recommender(spark)
-
-# Load user list
-@st.cache_data
-def load_users():
+def init_recommender(_spark):
+    """Initialize with enhanced validation"""
     try:
-        reviews = spark.read.parquet("data/cleaned_reviews.parquet")
-        users = reviews.select("userId").distinct().toPandas()["userId"].tolist()
-        return users
+        recommender = HybridRecommender(_spark)
+        
+        # Test with a sample user
+        test_user = _spark.read.parquet("data/cleaned_reviews.parquet") \
+            .select("userId").first()[0]
+        
+        # Verify recommendations can be generated
+        test_recs = recommender.get_als_recommendations(test_user, 1)
+        print(f"Test recommendation generated for user {test_user}")
+        
+        return recommender
+        
     except Exception as e:
-        st.error(f"Error loading user data: {str(e)}")
+        st.error(f"""
+        Recommender initialization failed!
+        Error: {str(e)}
+        
+        Please verify:
+        1. Your models were trained with correct column names
+        2. Your data files contain the expected columns
+        3. You have proper file permissions
+        """)
+        st.stop()
+        
+@st.cache_data
+def load_users(_spark):
+    """Load and cache distinct user IDs"""
+    try:
+        reviews = _spark.read.parquet("data/cleaned_reviews.parquet")
+        return reviews.select("user_id").distinct().toPandas()["user_id"].tolist()
+    except Exception as e:
+        st.error(f"Error loading users: {str(e)}")
         return []
 
-# Streamlit app
-st.title("E-commerce Product Recommender")
+def display_recommendations(recommendations):
+    """Display recommendations in Streamlit"""
+    recs_pd = recommendations.toPandas()
+    
+    st.subheader(f"Top {len(recs_pd)} Recommendations")
+    cols = st.columns(3)
+    
+    for idx, row in recs_pd.iterrows():
+        with cols[idx % 3]:
+            st.markdown(f"**{row['title']}**")
+            st.caption(f"${row['price']:.2f}")
+            if 'hybrid_score' in row:
+                st.progress(min(row['hybrid_score'], 1.0))
+                st.caption(f"Score: {row['hybrid_score']:.2f}")
 
-# User selection
-user_list = load_users()
-if not user_list:
-    st.error("No users found. Please check your data files.")
-    st.stop()
+def main():
+    st.set_page_config(page_title="Product Recommender", layout="wide")
+    st.title("E-commerce Product Recommender")
+    
+    # Initialize services
+    spark = init_spark()
+    recommender = init_recommender(spark)
+    
+    # User selection
+    user_list = load_users(spark)
+    if not user_list:
+        st.error("No users found. Please check your data files.")
+        st.stop()
+    
+    selected_user = st.selectbox("Select a user:", user_list)
+    num_recs = st.slider("Number of recommendations:", 5, 20, 10)
+    rec_type = st.radio("Recommendation type:", 
+                       ["Hybrid", "Collaborative Filtering", "Content-Based"])
+    
+    # Generate recommendations
+    if st.button("Get Recommendations"):
+        with st.spinner("Generating recommendations..."):
+            try:
+                if rec_type == "Hybrid":
+                    recs = recommender.hybrid_recommend(selected_user, num_recs)
+                elif rec_type == "Collaborative Filtering":
+                    recs = recommender.get_als_recommendations(selected_user, num_recs)
+                    recs = recs.join(
+                        spark.read.parquet("data/product_catalog.parquet"),
+                        "product_id"
+                    ).select("product_id", "title", "price")
+                else:
+                    recs = recommender.get_content_recommendations(selected_user, num_recs)
+                    recs = recs.join(
+                        spark.read.parquet("data/product_catalog.parquet"),
+                        "product_id"
+                    ).select("product_id", "title", "price")
+                
+                display_recommendations(recs)
+                
+            except Exception as e:
+                st.error(f"Recommendation error: {str(e)}")
 
-selected_user = st.selectbox("Select a user:", user_list)
-
-# Number of recommendations
-num_recs = st.slider("Number of recommendations:", 5, 20, 10)
-
-# Recommendation type
-rec_type = st.radio("Recommendation type:", 
-                   ["Hybrid", "Collaborative Filtering", "Content-Based"])
-
-# Get recommendations button
-if st.button("Get Recommendations"):
-    with st.spinner("Generating recommendations..."):
-        try:
-            if rec_type == "Hybrid":
-                recommendations = recommender.hybrid_recommend(selected_user, num_recs)
-            elif rec_type == "Collaborative Filtering":
-                recommendations = recommender.get_als_recommendations(selected_user, num_recs)
-                recommendations = recommendations.join(
-                    spark.read.parquet("data/product_catalog.parquet"),
-                    "productId"
-                ).select("productId", "title", "price")
-            else:
-                reviews = spark.read.parquet("data/cleaned_reviews.parquet")
-                similarities = spark.read.parquet("data/content_similarities.parquet")
-                recommendations = recommender.get_content_recommendations(selected_user, num_recs)
-                recommendations = recommendations.join(
-                    spark.read.parquet("data/product_catalog.parquet"),
-                    recommendations["productId"] == col("productId")
-                ).select("productId", "title", "price")
-            
-            # Convert to Pandas for display
-            recs_pd = recommendations.toPandas()
-            
-            # Display recommendations
-            st.subheader(f"Top {num_recs} Recommendations for User {selected_user}")
-            
-            for idx, row in recs_pd.iterrows():
-                with st.expander(f"{row['title']} - ${row['price']:.2f}"):
-                    st.write(f"**Product ID:** {row['productId']}")
-                    st.write(f"**Price:** ${row['price']:.2f}")
-                    if rec_type == "Hybrid" and 'hybrid_score' in row:
-                        st.write(f"**Recommendation Score:** {row['hybrid_score']:.2f}")
-        
-        except Exception as e:
-            st.error(f"Error generating recommendations: {str(e)}")
+if __name__ == "__main__":
+    main()

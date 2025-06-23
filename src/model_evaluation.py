@@ -113,7 +113,7 @@ if __name__ == "__main__":
     
     # Option 1: Evaluate existing model
     print("\nEvaluating existing model...")
-    model = ALSModel.load("../models/als_model")
+    model = ALSModel.load("models/als_model")
     evaluate_model(model, test)
     
     # Option 2: Hyperparameter tuning (takes longer)

@@ -12,7 +12,7 @@ class TestRecommendationSystem(unittest.TestCase):
         cls.recommender = HybridRecommender(cls.spark)
         
         # Load test data
-        cls.test_users = cls.spark.read.parquet("../data/cleaned_reviews.parquet") \
+        cls.test_users = cls.spark.read.parquet("data/cleaned_reviews.parquet") \
             .select("userId") \
             .distinct() \
             .limit(10) \
