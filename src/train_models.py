@@ -1,3 +1,4 @@
+# src/train_models.py - Fixed version
 from pyspark.sql import SparkSession
 from pyspark.ml.recommendation import ALS
 from pyspark.ml.feature import StringIndexer
@@ -12,22 +13,24 @@ def train_and_save_models():
         .getOrCreate()
 
     try:
-        # Load data - using Windows path
-        reviews = spark.read.parquet(os.path.join("data", "cleaned_reviews.parquet"))
+        # Load data
+        reviews = spark.read.parquet("data/cleaned_reviews.parquet")
         
-        # Verify columns - must match EXACTLY what's in your data
-        if "user_id" not in reviews.columns:
-            raise ValueError("Column 'user_id' not found. Available columns: " + str(reviews.columns))
+        # Verify required columns exist
+        required_columns = {'user_id', 'product_id', 'rating'}
+        if not required_columns.issubset(set(reviews.columns)):
+            missing = required_columns - set(reviews.columns)
+            raise ValueError(f"Missing required columns: {missing}")
 
-        # Create indexers with correct column names
+        # Create indexers
         user_indexer = StringIndexer(
-            inputCol="user_id",  # Must match your data exactly
-            outputCol="user_id_index"  # This will be the new column name
+            inputCol="user_id",
+            outputCol="user_id_index"
         ).fit(reviews)
 
         product_indexer = StringIndexer(
-            inputCol="product_id",  # Must match your data exactly
-            outputCol="product_id_index"  # This will be the new column name
+            inputCol="product_id",
+            outputCol="product_id_index"
         ).fit(reviews)
 
         # Transform data
@@ -38,27 +41,25 @@ def train_and_save_models():
         als = ALS(
             maxIter=5,
             regParam=0.01,
-            userCol="user_id_index",  # Must match indexer output
-            itemCol="product_id_index",  # Must match indexer output
+            userCol="user_id_index",
+            itemCol="product_id_index",
             ratingCol="rating",
             coldStartStrategy="drop",
             nonnegative=True
         )
         als_model = als.fit(indexed_data)
 
-        # Save models - Windows compatible paths
+        # Save models
         model_dir = "models"
         if os.path.exists(model_dir):
             shutil.rmtree(model_dir)
         os.makedirs(model_dir)
 
-        als_model.save(os.path.join(model_dir, "als_model"))
-        user_indexer.save(os.path.join(model_dir, "user_indexer"))
-        product_indexer.save(os.path.join(model_dir, "product_indexer"))
+        als_model.write().overwrite().save(os.path.join(model_dir, "als_model"))
+        user_indexer.write().overwrite().save(os.path.join(model_dir, "user_indexer"))
+        product_indexer.write().overwrite().save(os.path.join(model_dir, "product_indexer"))
 
-        print("Models saved successfully with columns:")
-        print(f"- Original user column: user_id")
-        print(f"- Indexed user column: user_id_index")
+        print("Models trained and saved successfully!")
 
     except Exception as e:
         print(f"ERROR: {str(e)}")

@@ -1,52 +1,40 @@
+# app.py - Fixed version
 import streamlit as st
 from pyspark.sql import SparkSession
 import os
-import sys
 from pathlib import Path
 
-# Add src directory to Python path
-sys.path.append(str(Path(__file__).parent / "src"))
 from hybrid_model import HybridRecommender
+# Add src directory to Python path
+import sys
+sys.path.append(str(Path(__file__).parent / "src"))
+
 
 @st.cache_resource
 def init_spark():
     """Initialize and cache Spark session"""
     return SparkSession.builder \
         .appName("ECommerceRecommender") \
-        .config("spark.driver.memory", "2g") \
+        .config("spark.driver.memory", "4g") \
+        .config("spark.executor.memory", "4g") \
+        .config("spark.sql.execution.pyspark.udf.faulthandler.enabled", "true") \
+        .config("spark.python.worker.faulthandler.enabled", "true") \
+        .config("spark.sql.shuffle.partitions", "100") \
+        .config("spark.default.parallelism", "100") \
         .getOrCreate()
 
 @st.cache_resource
 def init_recommender(_spark):
-    """Initialize with enhanced validation"""
+    """Initialize recommender with validation"""
     try:
-        recommender = HybridRecommender(_spark)
-        
-        # Test with a sample user
-        test_user = _spark.read.parquet("data/cleaned_reviews.parquet") \
-            .select("userId").first()[0]
-        
-        # Verify recommendations can be generated
-        test_recs = recommender.get_als_recommendations(test_user, 1)
-        print(f"Test recommendation generated for user {test_user}")
-        
-        return recommender
-        
+        return HybridRecommender(_spark)
     except Exception as e:
-        st.error(f"""
-        Recommender initialization failed!
-        Error: {str(e)}
-        
-        Please verify:
-        1. Your models were trained with correct column names
-        2. Your data files contain the expected columns
-        3. You have proper file permissions
-        """)
+        st.error(f"Failed to initialize recommender: {str(e)}")
         st.stop()
-        
+
 @st.cache_data
 def load_users(_spark):
-    """Load and cache distinct user IDs"""
+    """Load distinct user IDs"""
     try:
         reviews = _spark.read.parquet("data/cleaned_reviews.parquet")
         return reviews.select("user_id").distinct().toPandas()["user_id"].tolist()
@@ -55,7 +43,11 @@ def load_users(_spark):
         return []
 
 def display_recommendations(recommendations):
-    """Display recommendations in Streamlit"""
+    """Display recommendations in Streamlit with empty state handling"""
+    if recommendations.isEmpty():
+        st.warning("No recommendations could be generated for this user.")
+        return
+    
     recs_pd = recommendations.toPandas()
     
     st.subheader(f"Top {len(recs_pd)} Recommendations")
@@ -68,6 +60,10 @@ def display_recommendations(recommendations):
             if 'hybrid_score' in row:
                 st.progress(min(row['hybrid_score'], 1.0))
                 st.caption(f"Score: {row['hybrid_score']:.2f}")
+            elif 'als_score' in row:
+                st.caption("ALS Recommendation")
+            elif 'content_score' in row:
+                st.caption("Content-Based Recommendation")
 
 def main():
     st.set_page_config(page_title="Product Recommender", layout="wide")
@@ -96,16 +92,8 @@ def main():
                     recs = recommender.hybrid_recommend(selected_user, num_recs)
                 elif rec_type == "Collaborative Filtering":
                     recs = recommender.get_als_recommendations(selected_user, num_recs)
-                    recs = recs.join(
-                        spark.read.parquet("data/product_catalog.parquet"),
-                        "product_id"
-                    ).select("product_id", "title", "price")
                 else:
                     recs = recommender.get_content_recommendations(selected_user, num_recs)
-                    recs = recs.join(
-                        spark.read.parquet("data/product_catalog.parquet"),
-                        "product_id"
-                    ).select("product_id", "title", "price")
                 
                 display_recommendations(recs)
                 
