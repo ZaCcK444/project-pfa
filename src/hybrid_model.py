@@ -5,81 +5,73 @@ from pyspark.sql.functions import col, lit, explode, sum as _sum
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType
 import pyspark.sql.functions as F
 import os
-import time
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class HybridRecommender:
     def __init__(self, spark):
         self.spark = spark
         self._setup_checkpointing()
-        self._load_models()  # This will now call the properly implemented method
+        self._load_models()
         self._load_data()
         
     def _setup_checkpointing(self):
         """Configure checkpoint directory"""
-        checkpoint_dir = "/tmp/spark_checkpoints"
+        checkpoint_dir = os.path.join("checkpoints")
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
         self.spark.sparkContext.setCheckpointDir(checkpoint_dir)
         
     def _load_models(self):
-        """Proper implementation of model loading"""
+        """Load all required models with validation"""
         try:
             # Verify models directory exists
-            if not os.path.exists("models"):
-                raise FileNotFoundError("Models directory not found at 'models/'")
+            models_dir = "models"
+            if not os.path.exists(models_dir):
+                raise FileNotFoundError(f"Models directory not found at {os.path.abspath(models_dir)}")
                 
             # Load ALS model
-            als_model_path = os.path.join("models", "als_model")
-            if not os.path.exists(als_model_path):
-                raise FileNotFoundError(f"ALS model not found at {als_model_path}")
+            als_model_path = os.path.join(models_dir, "als_model")
             self.als_model = ALSModel.load(als_model_path)
             
-            # Load user indexer
-            user_indexer_path = os.path.join("models", "user_indexer")
-            if not os.path.exists(user_indexer_path):
-                raise FileNotFoundError(f"User indexer not found at {user_indexer_path}")
-            self.user_indexer = StringIndexerModel.load(user_indexer_path)
+            # Load indexers
+            self.user_indexer = StringIndexerModel.load(os.path.join(models_dir, "user_indexer"))
+            self.product_indexer = StringIndexerModel.load(os.path.join(models_dir, "product_indexer"))
             
-            # Load product indexer
-            product_indexer_path = os.path.join("models", "product_indexer")
-            if not os.path.exists(product_indexer_path):
-                raise FileNotFoundError(f"Product indexer not found at {product_indexer_path}")
-            self.product_indexer = StringIndexerModel.load(product_indexer_path)
+            logger.info("All models loaded successfully")
             
-            print("All models loaded successfully")
         except Exception as e:
-            raise ValueError(f"Failed to load models: {str(e)}\n"
-                          "Please ensure you've run train_models.py first to generate the required models")
+            logger.error(f"Model loading failed: {str(e)}")
+            raise
 
     def _load_data(self):
-        """Load required data files"""
+        """Load required data files with validation"""
         try:
             # Verify data directory exists
-            if not os.path.exists("data"):
-                raise FileNotFoundError("Data directory not found at 'data/'")
+            data_dir = "data"
+            if not os.path.exists(data_dir):
+                raise FileNotFoundError(f"Data directory not found at {os.path.abspath(data_dir)}")
                 
-            # Load product catalog
-            product_catalog_path = os.path.join("data", "product_catalog.parquet")
-            if not os.path.exists(product_catalog_path):
-                raise FileNotFoundError(f"Product catalog not found at {product_catalog_path}")
-            self.product_catalog = self.spark.read.parquet(product_catalog_path)
+            # Load datasets
+            self.product_catalog = self.spark.read.parquet(os.path.join(data_dir, "product_catalog.parquet"))
+            self.content_similarities = self.spark.read.parquet(os.path.join(data_dir, "content_similarities.parquet"))
+            self.reviews_df = self.spark.read.parquet(os.path.join(data_dir, "cleaned_reviews.parquet"))
             
-            # Load content similarities
-            content_similarities_path = os.path.join("data", "content_similarities.parquet")
-            if not os.path.exists(content_similarities_path):
-                raise FileNotFoundError(f"Content similarities not found at {content_similarities_path}")
-            self.content_similarities = self.spark.read.parquet(content_similarities_path)
+            # Cache frequently used data
+            self.product_catalog.cache()
+            self.reviews_df.cache()
             
-            # Load reviews data
-            reviews_path = os.path.join("data", "cleaned_reviews.parquet")
-            if not os.path.exists(reviews_path):
-                raise FileNotFoundError(f"Reviews data not found at {reviews_path}")
-            self.reviews_df = self.spark.read.parquet(reviews_path)
+            logger.info("All data loaded successfully")
             
-            print("All data loaded successfully")
         except Exception as e:
-            raise ValueError(f"Failed to load data: {str(e)}")
+            logger.error(f"Data loading failed: {str(e)}")
+            raise
 
     def get_als_recommendations(self, user_id, n=10):
-        """Get ALS recommendations for a user"""
+        """Get ALS recommendations for a user with proper error handling"""
         try:
             # Convert user_id to index
             user_df = self.spark.createDataFrame([(user_id,)], ["user_id"])
@@ -117,7 +109,7 @@ class HybridRecommender:
             ).select("product_id", "title", "price").limit(n)
             
         except Exception as e:
-            print(f"ALS recommendation error: {str(e)}")
+            logger.error(f"ALS recommendation error: {str(e)}")
             return self._empty_als_df()
 
     def _empty_als_df(self):
@@ -130,20 +122,16 @@ class HybridRecommender:
         return self.spark.createDataFrame([], schema)
 
     def get_content_recommendations(self, user_id, n=10):
-        """Get content-based recommendations"""
+        """Get content-based recommendations with proper error handling"""
         try:
-            # Define schema for empty fallback
-            content_schema = StructType([
-                StructField("product_id", StringType()),
-                StructField("title", StringType()),
-                StructField("price", DoubleType()),
-                StructField("total_score", DoubleType())
-            ])
-            
-            # Get user's liked products
+            # Get user's liked products with weights
             liked_products = self.reviews_df.filter(col("user_id") == user_id) \
                 .select("product_id", "rating") \
-                .withColumn("weight", (col("rating") - 3) / 2)
+                .withColumn("weight", (col("rating") - 3) / 2) \
+                .filter(col("weight").isNotNull())
+
+            if liked_products.isEmpty():
+                return self._empty_content_df()
             
             # Join with similarities
             recommendations = liked_products.join(
@@ -153,18 +141,18 @@ class HybridRecommender:
             ).select(
                 "product_id",
                 "weight",
-                explode(col("sorted_similarities")).alias("similarity")
+                explode(col("sorted_similarities")).alias("rec")
             ).select(
                 "product_id",
                 "weight",
-                col("similarity.similar_productId").alias("recommended_product"),
-                (col("similarity.score") * col("weight")).alias("weighted_score")
+                col("rec.product2").alias("recommended_product"),
+                (col("rec.similarity") * col("weight")).alias("weighted_score")
             )
-            
+
             # Filter out already rated products
             user_rated = self.reviews_df.filter(col("user_id") == user_id) \
                 .select("product_id").distinct()
-                
+
             final_recs = recommendations.join(
                 user_rated,
                 col("recommended_product") == col("product_id"),
@@ -177,50 +165,61 @@ class HybridRecommender:
                  self.product_catalog,
                  col("recommended_product") == col("product_id")
              ).select("product_id", "title", "price", "total_score")
-            
+
             return final_recs
             
         except Exception as e:
-            print(f"Content recommendation error: {str(e)}")
-            return self.spark.createDataFrame([], content_schema)
+            logger.error(f"Content recommendation error: {str(e)}")
+            return self._empty_content_df()
+
+    def _empty_content_df(self):
+        """Create empty DataFrame with correct schema for content recommendations"""
+        schema = StructType([
+            StructField("product_id", StringType()),
+            StructField("title", StringType()),
+            StructField("price", DoubleType()),
+            StructField("total_score", DoubleType())
+        ])
+        return self.spark.createDataFrame([], schema)
 
     def hybrid_recommend(self, user_id, n=10, als_weight=0.7, content_weight=0.3):
-        """Generate hybrid recommendations"""
+        """Generate hybrid recommendations with proper error handling"""
         try:
-            # Define schema for empty results
-            hybrid_schema = StructType([
-                StructField("product_id", StringType()),
-                StructField("title", StringType()),
-                StructField("price", DoubleType()),
-                StructField("hybrid_score", DoubleType())
-            ])
-            
-            # Get ALS recommendations
+            # Get recommendations from both models
             als_recs = self.get_als_recommendations(user_id, n)
             als_recs = als_recs.withColumn("als_score", lit(1.0)) if not als_recs.isEmpty() \
                 else self.spark.createDataFrame([], als_recs.schema.add("als_score", DoubleType()))
-            
-            # Get content recommendations
+
             content_recs = self.get_content_recommendations(user_id, n)
             content_recs = content_recs.withColumnRenamed("total_score", "content_score") \
                 if not content_recs.isEmpty() \
                 else self.spark.createDataFrame([], content_recs.schema.add("content_score", DoubleType()))
-            
+
             # Combine recommendations
             combined = als_recs.join(
                 content_recs,
                 ["product_id", "title", "price"],
                 "outer"
             ).fillna(0)
-            
+
             # Calculate hybrid score
             result = combined.withColumn(
                 "hybrid_score",
                 col("als_score") * als_weight + col("content_score") * content_weight
             ).orderBy(col("hybrid_score").desc()).limit(n)
-            
-            return result if not result.isEmpty() else self.spark.createDataFrame([], hybrid_schema)
+
+            return result if not result.isEmpty() else self._empty_hybrid_df()
             
         except Exception as e:
-            print(f"Hybrid recommendation error: {str(e)}")
-            return self.spark.createDataFrame([], hybrid_schema)
+            logger.error(f"Hybrid recommendation error: {str(e)}")
+            return self._empty_hybrid_df()
+
+    def _empty_hybrid_df(self):
+        """Create empty DataFrame with correct schema for hybrid recommendations"""
+        schema = StructType([
+            StructField("product_id", StringType()),
+            StructField("title", StringType()),
+            StructField("price", DoubleType()),
+            StructField("hybrid_score", DoubleType())
+        ])
+        return self.spark.createDataFrame([], schema)

@@ -3,61 +3,65 @@ from pyspark.sql import SparkSession
 import os
 from pathlib import Path
 import sys
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Add src directory to Python path
 sys.path.append(str(Path(__file__).parent / "src"))
 
-# Now import from hybrid_model
-from src.hybrid_model import HybridRecommender
-
 @st.cache_resource
 def init_spark():
-    """Initialize Spark with crash-resistant settings"""
-    return SparkSession.builder \
-        .appName("ECommerceRecommender") \
-        .config("spark.driver.memory", "8g") \
-        .config("spark.executor.memory", "8g") \
-        .config("spark.driver.maxResultSize", "2g") \
-        .config("spark.sql.execution.pyspark.udf.faulthandler.enabled", "true") \
-        .config("spark.python.worker.faulthandler.enabled", "true") \
-        .config("spark.sql.pyspark.jvmStacktrace.enabled", "true") \
-        .config("spark.memory.fraction", "0.8") \
-        .config("spark.memory.storageFraction", "0.3") \
-        .config("spark.executor.memoryOverhead", "4g") \
-        .config("spark.driver.memoryOverhead", "4g") \
-        .config("spark.sql.shuffle.partitions", "200") \
-        .config("spark.default.parallelism", "200") \
-        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
-        .config("spark.kryoserializer.buffer.max", "512m") \
-        .config("spark.network.timeout", "600s") \
-        .config("spark.executor.heartbeatInterval", "60s") \
-        .config("spark.task.maxFailures", "8") \
-        .config("spark.worker.cleanup.enabled", "true") \
-        .getOrCreate()
-        
+    """Initialize Spark with optimized settings"""
+    try:
+        spark = SparkSession.builder \
+            .appName("ECommerceRecommender") \
+            .config("spark.driver.memory", "4g") \
+            .config("spark.executor.memory", "4g") \
+            .config("spark.sql.shuffle.partitions", "200") \
+            .config("spark.default.parallelism", "200") \
+            .config("spark.sql.adaptive.enabled", "true") \
+            .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+            .getOrCreate()
+        logger.info("Spark session initialized successfully")
+        return spark
+    except Exception as e:
+        logger.error(f"Failed to initialize Spark: {str(e)}")
+        st.error("Failed to initialize Spark session. Please check the logs.")
+        st.stop()
+
 @st.cache_resource
 def init_recommender(_spark):
     """Initialize recommender with validation"""
     try:
-        return HybridRecommender(_spark)
+        from hybrid_model import HybridRecommender
+        recommender = HybridRecommender(_spark)
+        logger.info("Recommender initialized successfully")
+        return recommender
     except Exception as e:
+        logger.error(f"Failed to initialize recommender: {str(e)}")
         st.error(f"Failed to initialize recommender: {str(e)}")
         st.stop()
 
 @st.cache_data
 def load_users(_spark):
-    """Load distinct user IDs"""
+    """Load distinct user IDs with error handling"""
     try:
         reviews = _spark.read.parquet("data/cleaned_reviews.parquet")
-        return reviews.select("user_id").distinct().toPandas()["user_id"].tolist()
+        users = reviews.select("user_id").distinct().toPandas()["user_id"].tolist()
+        logger.info(f"Loaded {len(users)} users")
+        return users
     except Exception as e:
+        logger.error(f"Error loading users: {str(e)}")
         st.error(f"Error loading users: {str(e)}")
         return []
 
 def display_recommendations(recommendations):
-    """Display recommendations in Streamlit with empty state handling"""
+    """Display recommendations in Streamlit with proper formatting"""
     if recommendations.isEmpty():
-        st.warning("No recommendations could be generated for this user.")
+        st.warning("No recommendations could be generated.")
         return
     
     recs_pd = recommendations.toPandas()
@@ -67,15 +71,16 @@ def display_recommendations(recommendations):
     
     for idx, row in recs_pd.iterrows():
         with cols[idx % 3]:
-            st.markdown(f"**{row['title']}**")
-            st.caption(f"${row['price']:.2f}")
-            if 'hybrid_score' in row:
-                st.progress(min(row['hybrid_score'], 1.0))
-                st.caption(f"Score: {row['hybrid_score']:.2f}")
-            elif 'als_score' in row:
-                st.caption("ALS Recommendation")
-            elif 'content_score' in row:
-                st.caption("Content-Based Recommendation")
+            with st.container():
+                st.markdown(f"**{row['title']}**")
+                st.caption(f"Price: ${row['price']:.2f}")
+                if 'hybrid_score' in row:
+                    st.caption(f"Score: {row['hybrid_score']:.2f}")
+                    st.progress(min(row['hybrid_score'], 1.0))
+                elif 'total_score' in row:
+                    st.caption(f"Content Score: {row['total_score']:.2f}")
+                elif 'als_score' in row:
+                    st.caption("Collaborative Filtering Recommendation")
 
 def main():
     st.set_page_config(page_title="Product Recommender", layout="wide")
@@ -111,6 +116,7 @@ def main():
                 
             except Exception as e:
                 st.error(f"Recommendation error: {str(e)}")
+                logger.error(f"Recommendation error for user {selected_user}: {str(e)}")
 
 if __name__ == "__main__":
     main()
