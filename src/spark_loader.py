@@ -18,8 +18,8 @@ def load_data():
             .config("spark.sql.shuffle.partitions", "100") \
             .config("spark.sql.adaptive.enabled", "true") \
             .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-            .config("spark.driver.host", "127.0.0.1") \  # FIX: Explicit host binding
-            .config("spark.driver.bindAddress", "127.0.0.1") \  # FIX: Explicit bind address
+            .config("spark.driver.host", "127.0.0.1") \ 
+            .config("spark.driver.bindAddress", "127.0.0.1") \
             .getOrCreate()
 
         logger.info("Initialized Spark session successfully")

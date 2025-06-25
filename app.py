@@ -7,6 +7,8 @@ import sys
 import logging
 from typing import Optional, List, Tuple
 import pandas as pd
+from pathlib import Path
+from src.utils import ensure_project_structure
 
 # Configure logging
 logging.basicConfig(
@@ -66,8 +68,8 @@ def init_recommender(_spark: SparkSession):
 def load_users(_spark: SparkSession) -> List[str]:
     """Load distinct user IDs with error handling"""
     try:
-        data_path = "data/cleaned_reviews.parquet"
-        if not os.path.exists(data_path):
+        data_path = PROJECT_ROOT / "data/cleaned_reviews.parquet"
+        if not data_path.exists():
             raise FileNotFoundError(f"Cleaned reviews data not found at {data_path}")
             
         reviews = _spark.read.parquet(data_path)

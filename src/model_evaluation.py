@@ -100,8 +100,8 @@ if __name__ == "__main__":
         .appName("ModelEvaluation") \
         .config("spark.driver.memory", "4g") \
         .config("spark.executor.memory", "4g") \
-        .config("spark.driver.host", "127.0.0.1") \  # FIX: Explicit host binding
-        .config("spark.driver.bindAddress", "127.0.0.1") \  # FIX: Explicit bind address
+        .config("spark.driver.host", "127.0.0.1") \
+        .config("spark.driver.bindAddress", "127.0.0.1") \  
         .getOrCreate()
         
     try:
