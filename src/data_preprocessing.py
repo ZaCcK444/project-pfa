@@ -2,6 +2,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, count, when, regexp_replace, expr
 from pyspark.sql.types import DoubleType, FloatType
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,18 +37,17 @@ def clean_data():
 
         logger.info("Cleaning price data...")
         
-        # Clean price data
+        # Clean price data - CORRECTED VERSION
         df = df.withColumn("price", 
             when(
-                (col("raw_price").isNull() | 
+                (col("raw_price").isNull()) | 
                 (col("raw_price") == "") | 
                 (col("raw_price") == "unknown"), 
                 None
             ).otherwise(
                 regexp_replace(col("raw_price"), "[^0-9.]", "")
             )
-        )      )
-        
+        )
         
         # Safe conversion with validation
         df = df.withColumn("price", 
