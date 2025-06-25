@@ -20,19 +20,21 @@ def init_spark():
         .config("spark.driver.maxResultSize", "2g") \
         .config("spark.sql.execution.pyspark.udf.faulthandler.enabled", "true") \
         .config("spark.python.worker.faulthandler.enabled", "true") \
+        .config("spark.sql.pyspark.jvmStacktrace.enabled", "true") \
         .config("spark.memory.fraction", "0.8") \
         .config("spark.memory.storageFraction", "0.3") \
-        .config("spark.executor.memoryOverhead", "2g") \
-        .config("spark.driver.memoryOverhead", "2g") \
-        .config("spark.sql.shuffle.partitions", "100") \
-        .config("spark.default.parallelism", "100") \
+        .config("spark.executor.memoryOverhead", "4g") \
+        .config("spark.driver.memoryOverhead", "4g") \
+        .config("spark.sql.shuffle.partitions", "200") \
+        .config("spark.default.parallelism", "200") \
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
-        .config("spark.kryoserializer.buffer.max", "256m") \
+        .config("spark.kryoserializer.buffer.max", "512m") \
         .config("spark.network.timeout", "600s") \
         .config("spark.executor.heartbeatInterval", "60s") \
-        .config("spark.sql.pyspark.jvmStacktrace.enabled", "true") \
+        .config("spark.task.maxFailures", "8") \
+        .config("spark.worker.cleanup.enabled", "true") \
         .getOrCreate()
-
+        
 @st.cache_resource
 def init_recommender(_spark):
     """Initialize recommender with validation"""
