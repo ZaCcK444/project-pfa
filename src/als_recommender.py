@@ -1,87 +1,90 @@
 from pyspark.ml.recommendation import ALS
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.feature import StringIndexer
-from pyspark.sql import SparkSession
 import os
+import sys  # Make sure this is imported
+from spark_connector import create_spark_session
 
-def train_als_model(reviews_df):
-    # Verify required columns exist
-    required_columns = {'user_id', 'product_id', 'rating'}
-    if not required_columns.issubset(set(reviews_df.columns)):
-        missing = required_columns - set(reviews_df.columns)
-        raise ValueError(f"Missing required columns: {missing}")
-
-    # Split data into train and test sets
-    (train, test) = reviews_df.randomSplit([0.8, 0.2], seed=42)
+def prepare_data(spark, data_path="data/cleaned_reviews.parquet"):
+    """Load and prepare data with validation"""
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Data file not found at {data_path}")
     
-    # Build ALS model
+    df = spark.read.parquet(data_path)
+    
+    # Validate required columns
+    required_cols = {"user_id", "product_id", "rating"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    
+    # Create indices
+    user_indexer = StringIndexer(inputCol="user_id", outputCol="user_id_index")
+    product_indexer = StringIndexer(inputCol="product_id", outputCol="product_id_index")
+    
+    indexed_df = user_indexer.fit(df).transform(df)
+    indexed_df = product_indexer.fit(indexed_df).transform(indexed_df)
+    
+    return indexed_df
+
+def train_and_evaluate(df):
+    """Train ALS model with evaluation"""
+    train, test = df.randomSplit([0.8, 0.2], seed=42)
+    
     als = ALS(
         maxIter=5,
         regParam=0.01,
-        userCol="user_id_index",  # Using indexed column
-        itemCol="product_id_index",  # Using indexed column
+        userCol="user_id_index",
+        itemCol="product_id_index",
         ratingCol="rating",
         coldStartStrategy="drop",
-        nonnegative=True
+        nonnegative=True,
+        implicitPrefs=False
     )
     
-    # Train model
     model = als.fit(train)
-    
-    # Evaluate on test data
     predictions = model.transform(test)
+    
     evaluator = RegressionEvaluator(
         metricName="rmse",
         labelCol="rating",
         predictionCol="prediction"
     )
     rmse = evaluator.evaluate(predictions)
-    print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
     
-    # Generate recommendations
-    user_recs = model.recommendForAllUsers(10)
-    product_recs = model.recommendForAllItems(10)
-    
-    return model, user_recs, product_recs
+    return model, rmse
 
-if __name__ == "__main__":
-    from spark_loader import load_data
-    
+def main():
     spark = None
     try:
-        # Load data
-        spark, reviews_df, _ = load_data()
+        spark = create_spark_session("ALS_Recommender")
         
-        # Verify and show schema
-        print("\nDataFrame Schema:")
-        reviews_df.printSchema()
+        print("Loading and preparing data...")
+        df = prepare_data(spark)
         
-        # Create numeric indices for ALS
-        user_indexer = StringIndexer(inputCol="user_id", outputCol="user_id_index")
-        product_indexer = StringIndexer(inputCol="product_id", outputCol="product_id_index")
-        
-        # Fit and transform
-        indexed_reviews = user_indexer.fit(reviews_df).transform(reviews_df)
-        indexed_reviews = product_indexer.fit(indexed_reviews).transform(indexed_reviews)
-        
-        # Train model
-        model, user_recs, product_recs = train_als_model(indexed_reviews)
-        
-        # Show sample recommendations
-        print("\nTop 5 User Recommendations:")
-        user_recs.show(5, truncate=False)
-        
-        print("\nTop 5 Product Recommendations:")
-        product_recs.show(5, truncate=False)
+        print("Training ALS model...")
+        model, rmse = train_and_evaluate(df)
+        print(f"Model trained successfully. RMSE: {rmse:.4f}")
         
         # Save model
-        model_path = os.path.abspath("models/als_model")
+        model_path = "models/als_model"
         model.save(model_path)
-        print(f"\nModel saved to: {model_path}")
+        print(f"Model saved to {model_path}")
+        
+        # Generate recommendations
+        print("Generating recommendations...")
+        user_recs = model.recommendForAllUsers(10)
+        product_recs = model.recommendForAllItems(10)
+        
+        print("\nSample user recommendations:")
+        user_recs.show(5, truncate=False)
         
     except Exception as e:
-        print(f"\nError: {str(e)}")
+        print(f"\nERROR: {str(e)}", file=sys.stderr)
     finally:
         if spark:
             spark.stop()
-            print("\nSpark session closed")
+            print("Spark session closed")
+
+if __name__ == "__main__":
+    main()

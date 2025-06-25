@@ -95,30 +95,42 @@ def hyperparameter_tuning(train_data):
     return best_model
 
 if __name__ == "__main__":
-    from spark_loader import load_data
-    
-    spark, reviews_df, _ = load_data()
-    
-    # Load indexed data (from Week 5)
-    from pyspark.ml.feature import StringIndexer
-    
-    user_indexer = StringIndexer(inputCol="userId", outputCol="userIdIndex").fit(reviews_df)
-    product_indexer = StringIndexer(inputCol="productId", outputCol="productIdIndex").fit(reviews_df)
-    
-    indexed_reviews = user_indexer.transform(reviews_df)
-    indexed_reviews = product_indexer.transform(indexed_reviews)
-    
-    # Split data
-    (train, test) = indexed_reviews.randomSplit([0.8, 0.2], seed=42)
-    
-    # Option 1: Evaluate existing model
-    print("\nEvaluating existing model...")
-    model = ALSModel.load("models/als_model")
-    evaluate_model(model, test)
-    
-    # Option 2: Hyperparameter tuning (takes longer)
-    print("\nRunning hyperparameter tuning...")
-    best_model = hyperparameter_tuning(train)
-    evaluate_model(best_model, test)
-    
-    spark.stop()
+    # Create Spark session with host config
+    spark = SparkSession.builder \
+        .appName("ModelEvaluation") \
+        .config("spark.driver.memory", "4g") \
+        .config("spark.executor.memory", "4g") \
+        .config("spark.driver.host", "127.0.0.1") \  # FIX: Explicit host binding
+        .config("spark.driver.bindAddress", "127.0.0.1") \  # FIX: Explicit bind address
+        .getOrCreate()
+        
+    try:
+        from spark_loader import load_data
+        _, reviews_df, _ = load_data()
+        
+        # Load indexed data (from Week 5)
+        from pyspark.ml.feature import StringIndexer
+        
+        user_indexer = StringIndexer(inputCol="userId", outputCol="userIdIndex").fit(reviews_df)
+        product_indexer = StringIndexer(inputCol="productId", outputCol="productIdIndex").fit(reviews_df)
+        
+        indexed_reviews = user_indexer.transform(reviews_df)
+        indexed_reviews = product_indexer.transform(indexed_reviews)
+        
+        # Split data
+        (train, test) = indexed_reviews.randomSplit([0.8, 0.2], seed=42)
+        
+        # Option 1: Evaluate existing model
+        print("\nEvaluating existing model...")
+        model = ALSModel.load("models/als_model")
+        evaluate_model(model, test)
+        
+        # Option 2: Hyperparameter tuning (takes longer)
+        print("\nRunning hyperparameter tuning...")
+        best_model = hyperparameter_tuning(train)
+        evaluate_model(best_model, test)
+        
+    except Exception as e:
+        print(f"Error during evaluation: {str(e)}")
+    finally:
+        spark.stop()

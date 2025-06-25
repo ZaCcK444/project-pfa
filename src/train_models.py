@@ -1,4 +1,3 @@
-# src/train_models.py - Fixed version
 from pyspark.sql import SparkSession
 from pyspark.ml.recommendation import ALS
 from pyspark.ml.feature import StringIndexer
@@ -10,6 +9,8 @@ def train_and_save_models():
         .appName("ModelTraining") \
         .config("spark.driver.memory", "4g") \
         .config("spark.executor.memory", "4g") \
+        .config("spark.driver.host", "127.0.0.1") \  # FIX: Explicit host binding
+        .config("spark.driver.bindAddress", "127.0.0.1") \  # FIX: Explicit bind address
         .getOrCreate()
 
     try:
