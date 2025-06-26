@@ -3,13 +3,14 @@ from pyspark.ml.recommendation import ALS
 from pyspark.ml.feature import StringIndexer
 import os
 import shutil
-from pyspark.sql import SparkSession
 from src.utils import get_spark_config
 from src.spark_connector import create_spark_session
 
 def train_and_save_models():
-    spark = create_spark_session("ModelTraining")
+    spark = None
     try:
+        spark = create_spark_session("ModelTraining")
+        
         # Load data
         reviews = spark.read.parquet("data/cleaned_reviews.parquet")
         
@@ -62,7 +63,8 @@ def train_and_save_models():
         print(f"ERROR: {str(e)}")
         raise
     finally:
-        spark.stop()
+        if spark:
+            spark.stop()
 
 if __name__ == "__main__":
     train_and_save_models()

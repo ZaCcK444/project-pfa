@@ -3,7 +3,6 @@ from pyspark.sql.functions import col, count, when, regexp_replace, expr
 from pyspark.sql.types import DoubleType, FloatType, StringType
 import logging
 import os
-from pyspark.sql import SparkSession
 from src.utils import get_spark_config
 from src.spark_connector import create_spark_session
 
@@ -12,8 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-   def clean_data():
-
+def clean_data():
     spark = None
     try:
         spark = create_spark_session("ECommerceDataCleaning")

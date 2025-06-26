@@ -23,8 +23,8 @@ def preprocess_product_data(product_catalog):
         # Clean title text (safe for nulls)
         product_catalog = product_catalog.withColumn(
             "cleaned_title",
-            F.regexp_replace(F.lower(F.coalesce(F.col("title"), F.lit("")), "[^a-zA-Z0-9\\s]", "")
-        ).filter(F.length(F.col("cleaned_title")) > 0))
+            F.regexp_replace(F.lower(F.coalesce(F.col("title"), F.lit(""))), "[^a-zA-Z0-9\\s]", "")
+        ).filter(F.length(F.col("cleaned_title")) > 0)
 
         # Text processing pipeline
         tokenizer = Tokenizer(inputCol="cleaned_title", outputCol="words")
@@ -100,7 +100,7 @@ def get_content_recommendations(user_id, user_reviews, product_catalog, content_
             StructField("product_id", StringType()),
             StructField("title", StringType()),
             StructField("price", DoubleType()),
-            StructField("score", DoubleType())
+            StructField("total_score", DoubleType())
         ])
 
         # Validate inputs
@@ -171,3 +171,33 @@ def get_content_recommendations(user_id, user_reviews, product_catalog, content_
     except Exception as e:
         logger.error(f"Recommendation failed for user {user_id}: {str(e)}", exc_info=True)
         return user_reviews.sparkSession.createDataFrame([], result_schema)
+
+
+def main():
+    """Main function to run content-based similarity calculation"""
+    spark = None
+    try:
+        spark = create_spark_session("ContentBasedRecommender")
+        
+        # Load product catalog
+        product_catalog = spark.read.parquet("data/product_catalog.parquet")
+        
+        print("Preprocessing product data...")
+        processed_products = preprocess_product_data(product_catalog)
+        
+        print("Calculating similarities...")
+        similarities = calculate_similarity(processed_products)
+        
+        # Save similarities
+        similarities.write.mode("overwrite").parquet("data/content_similarities.parquet")
+        print("Content similarities saved successfully!")
+        
+    except Exception as e:
+        print(f"Error in content-based processing: {str(e)}")
+        raise
+    finally:
+        if spark:
+            spark.stop()
+
+if __name__ == "__main__":
+    main()

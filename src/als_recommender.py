@@ -2,7 +2,7 @@ from pyspark.ml.recommendation import ALS
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.feature import StringIndexer
 import os
-import sys  # Make sure this is imported
+import sys
 from src.spark_connector import create_spark_session
 from pyspark.sql import SparkSession
 from src.utils import get_spark_config
@@ -57,16 +57,12 @@ def train_and_evaluate(df):
     
     return model, rmse
 
-from pyspark.sql import SparkSession
-from utils import get_spark_config
-
 
 def main():
     spark = None
     try:
         spark = create_spark_session("ALS_Recommender")
         
-
         print("Loading and preparing data...")
         df = prepare_data(spark)
         
