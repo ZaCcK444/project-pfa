@@ -127,6 +127,8 @@ def display_recommendations(recommendations) -> None:
                         st.caption(f"Content Score: {float(row['total_score']):.2f}")
                     elif 'als_score' in row and pd.notna(row['als_score']):
                         st.caption("Collaborative Filtering Recommendation")
+                    else:
+                        st.caption("Recommended for you")
                         
                     st.markdown("---")
     except Exception as e:
