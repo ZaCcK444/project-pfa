@@ -1,17 +1,16 @@
 from pyspark.sql import SparkSession
 import os
 import logging
-from pyspark.sql import SparkSession
-from src.utils import get_spark_config
 from src.spark_connector import create_spark_session
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-    def load_data():
-     spark = None
-       try:
+def load_data():
+    """Load data with proper error handling and validation"""
+    spark = None
+    try:
         # Use the connector function to create a robust session
         spark = create_spark_session("RecommendationSystem")
         
@@ -32,6 +31,12 @@ logger = logging.getLogger(__name__)
         logger.info("Loading product catalog...")
         product_catalog = spark.read.parquet(catalog_path)
         
+        # Validate data
+        if reviews_df.count() == 0:
+            raise ValueError("Reviews dataset is empty")
+        if product_catalog.count() == 0:
+            raise ValueError("Product catalog is empty")
+        
         # Cache frequently used DataFrames
         reviews_df.cache()
         product_catalog.cache()
@@ -47,6 +52,7 @@ logger = logging.getLogger(__name__)
         raise RuntimeError(f"Data loading failed: {str(e)}")
 
 if __name__ == "__main__":
+    spark = None
     try:
         spark, reviews_df, product_catalog = load_data()
         
@@ -65,6 +71,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nError occurred: {str(e)}")
     finally:
-        if 'spark' in locals():
+        if spark is not None:
             spark.stop()
             print("\nSpark session closed")
