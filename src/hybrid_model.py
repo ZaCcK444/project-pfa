@@ -6,6 +6,7 @@ from pyspark.sql.types import StructType, StructField, StringType, DoubleType
 import pyspark.sql.functions as F
 import os
 import logging
+from src.spark_connector import create_spark_session
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -141,7 +142,7 @@ class HybridRecommender:
             ).select(
                 "product_id",
                 "weight",
-                explode(col("sorted_similarities")).alias("rec")
+                explode(col("similar_items")).alias("rec")
             ).select(
                 "product_id",
                 "weight",

@@ -1,9 +1,11 @@
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.sql import SparkSession
-from pyspark.ml.recommendation import ALSModel
+from pyspark.ml.recommendation import ALSModel, ALS
 import matplotlib.pyplot as plt
 import numpy as np
-
+from pyspark.sql import SparkSession
+from src.utils import get_spark_config
+from src.spark_connector import create_spark_session
 def evaluate_model(model, test_data):
     # Make predictions
     predictions = model.transform(test_data)
@@ -93,26 +95,27 @@ def hyperparameter_tuning(train_data):
     print("Best RMSE:", best_rmse)
     
     return best_model
+if __name__ == "__main__":
+    spark = create_spark_session("ModelEvaluation")
+
 
 if __name__ == "__main__":
     # Create Spark session with host config
+    if __name__ == "__main__":
+    conf = get_spark_config("ModelEvaluation")
     spark = SparkSession.builder \
-        .appName("ModelEvaluation") \
-        .config("spark.driver.memory", "4g") \
-        .config("spark.executor.memory", "4g") \
-        .config("spark.driver.host", "127.0.0.1") \
-        .config("spark.driver.bindAddress", "127.0.0.1") \  
+        .config(conf=conf) \
         .getOrCreate()
-        
+
     try:
-        from spark_loader import load_data
+        from src.spark_loader import load_data
         _, reviews_df, _ = load_data()
         
         # Load indexed data (from Week 5)
         from pyspark.ml.feature import StringIndexer
         
-        user_indexer = StringIndexer(inputCol="userId", outputCol="userIdIndex").fit(reviews_df)
-        product_indexer = StringIndexer(inputCol="productId", outputCol="productIdIndex").fit(reviews_df)
+        user_indexer = StringIndexer(inputCol="user_id", outputCol="userIdIndex").fit(reviews_df)
+        product_indexer = StringIndexer(inputCol="product_id", outputCol="productIdIndex").fit(reviews_df)
         
         indexed_reviews = user_indexer.transform(reviews_df)
         indexed_reviews = product_indexer.transform(indexed_reviews)

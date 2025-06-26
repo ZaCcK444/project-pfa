@@ -1,8 +1,11 @@
-from pyspark.ml.feature import Tokenizer, StopWordsRemover, CountVectorizer, IDF, MinMaxScaler, VectorAssembler
-from pyspark.ml import Pipeline
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, ArrayType
+from pyspark.sql.window import Window
+from pyspark.ml.feature import Tokenizer, StopWordsRemover, CountVectorizer, IDF, MinMaxScaler, VectorAssembler
+from pyspark.ml import Pipeline
 import logging
+from src.spark_connector import create_spark_session
+
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -21,8 +24,8 @@ def preprocess_product_data(product_catalog):
         product_catalog = product_catalog.withColumn(
             "cleaned_title",
             F.regexp_replace(F.lower(F.coalesce(F.col("title"), F.lit("")), "[^a-zA-Z0-9\\s]", "")
-        ).filter(F.length(F.col("cleaned_title")) > 0))
-
+        ).filter(F.length(F.col("cleaned_title")) > 0)
+       )
         # Text processing pipeline
         tokenizer = Tokenizer(inputCol="cleaned_title", outputCol="words")
         remover = StopWordsRemover(inputCol="words", outputCol="filtered_words")

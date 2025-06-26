@@ -3,16 +3,12 @@ from pyspark.ml.recommendation import ALS
 from pyspark.ml.feature import StringIndexer
 import os
 import shutil
+from pyspark.sql import SparkSession
+from src.utils import get_spark_config
+from src.spark_connector import create_spark_session
 
 def train_and_save_models():
-    spark = SparkSession.builder \
-        .appName("ModelTraining") \
-        .config("spark.driver.memory", "4g") \
-        .config("spark.executor.memory", "4g") \
-        .config("spark.driver.host", "127.0.0.1") \ 
-        .config("spark.driver.bindAddress", "127.0.0.1") \ 
-        .getOrCreate()
-
+    spark = create_spark_session("ModelTraining")
     try:
         # Load data
         reviews = spark.read.parquet("data/cleaned_reviews.parquet")

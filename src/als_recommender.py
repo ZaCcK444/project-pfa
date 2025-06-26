@@ -3,7 +3,10 @@ from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.feature import StringIndexer
 import os
 import sys  # Make sure this is imported
-from spark_connector import create_spark_session
+from src.spark_connector import create_spark_session
+from pyspark.sql import SparkSession
+from src.utils import get_spark_config
+
 
 def prepare_data(spark, data_path="data/cleaned_reviews.parquet"):
     """Load and prepare data with validation"""
@@ -54,11 +57,16 @@ def train_and_evaluate(df):
     
     return model, rmse
 
+from pyspark.sql import SparkSession
+from utils import get_spark_config
+
+
 def main():
     spark = None
     try:
         spark = create_spark_session("ALS_Recommender")
         
+
         print("Loading and preparing data...")
         df = prepare_data(spark)
         

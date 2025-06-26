@@ -1,23 +1,25 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, count, when, regexp_replace, expr
-from pyspark.sql.types import DoubleType, FloatType
+from pyspark.sql.types import DoubleType, FloatType, StringType
 import logging
 import os
+from pyspark.sql import SparkSession
+from src.utils import get_spark_config
+from src.spark_connector import create_spark_session
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 def clean_data():
-    """Clean and preprocess the raw data with comprehensive error handling"""
+
     spark = None
     try:
-        # Initialize Spark with optimized configuration
+        spark = create_spark_session("ECommerceDataCleaning")
+
         spark = SparkSession.builder \
-            .appName("ECommerceDataCleaning") \
-            .config("spark.driver.memory", "4g") \
-            .config("spark.sql.shuffle.partitions", "100") \
-            .config("spark.sql.adaptive.enabled", "true") \
+            .config(conf=conf) \
             .getOrCreate()
 
         logger.info("Loading raw data...")
@@ -61,19 +63,21 @@ def clean_data():
         logger.info("Cleaning rating data...")
         
         # Clean rating data
+        df = df.withColumn("raw_rating_str", col("raw_rating").cast(StringType()))
+        
         df = df.withColumn("rating",
-            when(col("raw_rating").contains("/"),
+            when(col("raw_rating_str").contains("/"),
                 expr("""
-                    CASE WHEN split(raw_rating, '/')[1] = '0' THEN NULL
-                    ELSE cast(split(raw_rating, '/')[0] as double) / cast(split(raw_rating, '/')[1] as double)
+                    CASE WHEN split(raw_rating_str, '/')[1] = '0' THEN NULL
+                    ELSE cast(split(raw_rating_str, '/')[0] as double) / cast(split(raw_rating_str, '/')[1] as double)
                     END
                 """)
             ).otherwise(
-                when(col("raw_rating").rlike("^[0-9.]+$"),
-                    col("raw_rating").cast(FloatType())
+                when(col("raw_rating_str").rlike("^[0-9.]+$"),
+                    col("raw_rating_str").cast(FloatType())
                 ).otherwise(None)
             )
-        )
+        ).drop("raw_rating_str")
 
         logger.info("Processing helpfulness data...")
         

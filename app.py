@@ -1,5 +1,5 @@
 import streamlit as st
-from pyspark.sql import SparkSession
+from src.spark_connector import create_spark_session
 from pyspark.sql.functions import col
 import os
 from pathlib import Path
@@ -7,8 +7,8 @@ import sys
 import logging
 from typing import Optional, List, Tuple
 import pandas as pd
-from pathlib import Path
 from src.utils import ensure_project_structure
+from pyspark.sql import SparkSession
 
 # Configure logging
 logging.basicConfig(
@@ -19,39 +19,41 @@ logger = logging.getLogger(__name__)
 
 # Add src directory to Python path
 sys.path.append(str(Path(__file__).parent / "src"))
+PROJECT_ROOT = ensure_project_structure()
 
 @st.cache_resource
 def init_spark() -> SparkSession:
     """Initialize Spark with optimized settings"""
     try:
-        spark = SparkSession.builder \
-            .config("spark.driver.memory", "8g") \
-            .config("spark.executor.memory", "8g") \
-            .config("spark.memory.fraction", "0.8") \
-            .config("spark.memory.storageFraction", "0.3") \
-            .appName("ECommerceRecommender") \
-            .config("spark.sql.shuffle.partitions", "200") \
-            .config("spark.default.parallelism", "200") \
-            .config("spark.sql.execution.pyspark.udf.faulthandler.enabled", "true") \
-            .config("spark.python.worker.faulthandler.enabled", "true") \
-            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
-            .config("spark.executor.heartbeatInterval", "60s") \
-            .config("spark.network.timeout", "600s") \
-            .config("spark.driver.maxResultSize", "4g") \
-            .getOrCreate()
+        # Set environment variables for Spark
+        os.environ['SPARK_LOCAL_IP'] = '127.0.0.1'
+        os.environ['SPARK_LOCAL_DIRS'] = '/tmp/spark-temp'
+        
+        # Create Spark session with enhanced configuration
+        spark = create_spark_session(
+            app_name="ECommerceRecommender",
+            max_retries=5,
+            retry_delay=15
+        )
+        
+        # Additional configuration specific to this app
+        spark.conf.set("spark.driver.memory", "8g")
+        spark.conf.set("spark.executor.memory", "8g")
+        spark.conf.set("spark.sql.shuffle.partitions", "200")
+        spark.conf.set("spark.default.parallelism", "200")
         
         logger.info("Spark session initialized successfully")
         return spark
     except Exception as e:
         logger.error(f"Failed to initialize Spark: {str(e)}", exc_info=True)
-        st.error("Failed to initialize Spark session. Please check the logs.")
+        st.error(f"Failed to initialize Spark session: {str(e)}")
         st.stop()
 
 @st.cache_resource
 def init_recommender(_spark: SparkSession):
     """Initialize recommender with validation"""
     try:
-        from hybrid_model import HybridRecommender
+        from src.hybrid_model import HybridRecommender
         recommender = HybridRecommender(_spark)
         logger.info("Recommender initialized successfully")
         return recommender
@@ -72,7 +74,7 @@ def load_users(_spark: SparkSession) -> List[str]:
         if not data_path.exists():
             raise FileNotFoundError(f"Cleaned reviews data not found at {data_path}")
             
-        reviews = _spark.read.parquet(data_path)
+        reviews = _spark.read.parquet(str(data_path))
         
         if "user_id" not in reviews.columns:
             raise ValueError("user_id column not found in reviews data")

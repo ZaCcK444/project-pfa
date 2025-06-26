@@ -1,29 +1,23 @@
 from pyspark.sql import SparkSession
 import os
 import logging
+from pyspark.sql import SparkSession
+from src.utils import get_spark_config
+from src.spark_connector import create_spark_session
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def load_data():
-    """Load data with comprehensive error handling and validation"""
+    def load_data():
     spark = None
     try:
-        # Initialize Spark with optimized configuration
+        conf = get_spark_config("RecommendationSystem")
         spark = SparkSession.builder \
-            .appName("RecommendationSystem") \
-            .config("spark.driver.memory", "4g") \
-            .config("spark.executor.memory", "4g") \
-            .config("spark.sql.shuffle.partitions", "100") \
-            .config("spark.sql.adaptive.enabled", "true") \
-            .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-            .config("spark.driver.host", "127.0.0.1") \ 
-            .config("spark.driver.bindAddress", "127.0.0.1") \
+            .config(conf=conf) \
             .getOrCreate()
-
-        logger.info("Initialized Spark session successfully")
         
+
         # Define paths
         data_dir = "data"
         reviews_path = os.path.join(data_dir, "cleaned_reviews.parquet")

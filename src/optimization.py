@@ -1,5 +1,8 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import broadcast
+from spark_loader import load_data
+from hybrid_model import HybridRecommender
+from src.spark_connector import create_spark_session
 
 def optimize_spark_config(spark):
     # Optimize Spark configuration
@@ -40,8 +43,7 @@ def optimize_recommendations(recommender, user_id):
     # (Similar to hybrid_model.py but with optimizations applied)
 
 if __name__ == "__main__":
-    from spark_loader import load_data
-    from hybrid_model import HybridRecommender
+
     
     spark = load_data()[0]  # Get just the Spark session
     spark = optimize_spark_config(spark)
