@@ -6,6 +6,9 @@ import numpy as np
 from pyspark.sql import SparkSession
 from src.utils import get_spark_config
 from src.spark_connector import create_spark_session
+
+
+
 def evaluate_model(model, test_data):
     # Make predictions
     predictions = model.transform(test_data)
@@ -100,7 +103,11 @@ if __name__ == "__main__":
 
 
 if __name__ == "__main__":
-    # Create Spark session with host config
+    spark = create_spark_session("ModelEvaluation")
+    try:
+        from src.spark_loader import load_data
+        _, reviews_df, _ = load_data()
+        
     if __name__ == "__main__":
     conf = get_spark_config("ModelEvaluation")
     spark = SparkSession.builder \

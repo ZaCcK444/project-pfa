@@ -12,16 +12,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def clean_data():
+   def clean_data():
 
     spark = None
     try:
         spark = create_spark_session("ECommerceDataCleaning")
-
-        spark = SparkSession.builder \
-            .config(conf=conf) \
-            .getOrCreate()
-
+        
         logger.info("Loading raw data...")
         
         # Load the raw data

@@ -10,14 +10,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
     def load_data():
-    spark = None
-    try:
-        conf = get_spark_config("RecommendationSystem")
-        spark = SparkSession.builder \
-            .config(conf=conf) \
-            .getOrCreate()
+     spark = None
+       try:
+        # Use the connector function to create a robust session
+        spark = create_spark_session("RecommendationSystem")
         
-
         # Define paths
         data_dir = "data"
         reviews_path = os.path.join(data_dir, "cleaned_reviews.parquet")

@@ -5,13 +5,12 @@ from pyspark.sql import SparkSession
 from src.utils import get_spark_config
 from src.spark_connector import create_spark_session
 class TestRecommendationSystem(unittest.TestCase):
-    @classmethod
+        @classmethod
     def setUpClass(cls):
-        cls.spark = SparkSession.builder \
-            .appName("Testing") \
-            .getOrCreate()
-        
+        cls.spark = create_spark_session("Testing")
         cls.recommender = HybridRecommender(cls.spark)
+        
+      
         
         # Load test data
         cls.test_users = cls.spark.read.parquet("data/cleaned_reviews.parquet") \
